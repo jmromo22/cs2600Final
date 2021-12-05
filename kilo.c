@@ -51,6 +51,7 @@ struct editorConfig {
   int screencols;
   int numrows;
   erow *row;
+  char *filename;
   struct termios orig_termios;
 };
 struct editorConfig E;
@@ -223,13 +224,16 @@ void editorAppendRow(char *s, size_t len) {
 
 /*** file i/o ***/
 void editorOpen(char *filename) {
+  free(E.filename);
+  E.filename = strdup(filename);
+  
   FILE *fp = fopen(filename, "r");
   if (!fp) die("fopen");
-
+  
   char *line = NULL;
   size_t linecap = 0;
   ssize_t linelen;
-   while ((linelen = getline(&line, &linecap, fp)) != -1) {
+  while ((linelen = getline(&line, &linecap, fp)) != -1) {
     while (linelen > 0 && (line[linelen - 1] == '\n' ||
                            line[linelen - 1] == '\r'))
       linelen--;
@@ -238,6 +242,7 @@ void editorOpen(char *filename) {
   free(line);
   fclose(fp);
 }
+
 /*** append buffer ***/
 struct abuf {
   char *b;
@@ -306,12 +311,31 @@ void editorDrawRows(struct abuf *ab) {
       abAppend(ab, &E.row[filerow].render[E.coloff], len);
     }
      abAppend(ab, "\x1b[K", 3);
-    if (y < E.screenrows - 1) {
+    
       abAppend(ab, "\r\n", 2);
     }
-  }
+  
 }
-
+void editorDrawStatusBar(struct abuf *ab) {
+  abAppend(ab, "\x1b[7m", 4);
+  char status[80], rstatus[80];
+  int len = snprintf(status, sizeof(status), "%.20s - %d lines",
+    E.filename ? E.filename : "[No Name]", E.numrows);
+  int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
+    E.cy + 1, E.numrows);
+  if (len > E.screencols) len = E.screencols;
+  abAppend(ab, status, len);
+  while (len < E.screencols) {
+    if (E.screencols - len == rlen) {
+      abAppend(ab, rstatus, rlen);
+      break;
+    } else {
+      abAppend(ab, " ", 1);
+      len++;
+    }
+  }
+  abAppend(ab, "\x1b[m", 3);
+}
 
 void editorRefreshScreen() {
  editorScroll();
@@ -322,6 +346,7 @@ abAppend(&ab, "\x1b[?25l", 6);
 abAppend(&ab, "\x1b[H", 3);
   
 editorDrawRows(&ab);
+editorDrawStatusBar(&ab);
   
 char buf[32];
 snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cy - E.rowoff) + 1,
@@ -431,9 +456,11 @@ void initEditor() {
   E.rowoff = 0;
   E.coloff = 0;
   E.numrows = 0;
-  E.row = NULL;  
+  E.row = NULL;
+  E.filename = NULL;  
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+  E.screenrows -= 1;
 }
 
 
